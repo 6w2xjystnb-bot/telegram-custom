@@ -31,19 +31,19 @@ jobs:
           API_ID: "6"
           API_HASH: "eb06d4abfb49dc3eeb1aeb98ae0f581e"
         run: |
-          # Вот оно! Make.py с правильными флагами для обхода подписи
+          # Передаем скрипту все требуемые параметры, чтобы он отстал
           python3 build-system/Make/Make.py \
             --cacheDir="$HOME/bazel-cache" \
             build \
             --configurationPath=build-system/template_minimal_development_configuration.json \
-            --disableProvisioningProfiles \
+            --buildNumber 100000 \
+            --xcodeManagedCodesigning \
             --configuration=release_arm64
 
       - name: Package to IPA
         run: |
           echo "Упаковка скомпилированного .app в .ipa..."
           mkdir -p Payload
-          # Ищем собранный файл Telegram.app по всей директории
           find . -type d -name "Telegram.app" -exec cp -R {} Payload/ \;
           zip -qr Telegram-Custom.ipa Payload
 
