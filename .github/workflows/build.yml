@@ -10,7 +10,7 @@ jobs:
     runs-on: macos-15
 
     steps:
-      - name: 1. Checkout Official Telegram Code (Base)
+      - name: 1. Checkout Official Telegram Code
         run: |
           echo "Скачиваем официальный код..."
           git clone --recursive --depth 1 https://github.com/TelegramMessenger/Telegram-iOS.git telegram-src
@@ -43,21 +43,24 @@ jobs:
           REAL_VERSION=$(xcodebuild -version | grep "Xcode" | awk '{print $2}')
           echo "XCODE_VERSION=$REAL_VERSION" >> $GITHUB_ENV
 
-      - name: 7. Patch Configuration
+      - name: 7. Patch Config & Inject Defines
         run: |
           cd telegram-src
           echo "Исправляем ловушки в конфигах..."
           
-          # Заменяем тот самый плейсхолдер с пробелами на нормальную слитную строку
+          # 1. Заменяем плейсхолдер
           sed -i '' 's/! a random string !/lendicbuild2026/g' build-system/template_minimal_development_configuration.json
           
-          # Подменяем версию Xcode, как мы делали раньше
+          # 2. Подменяем версию Xcode
           find . -name "versions.json" -exec sed -i '' "s/26.4/$XCODE_VERSION/g" {} +
+          
+          # 3. ВАЖНО: Вшиваем значения напрямую в мозг Bazel, чтобы он не задавал вопросов
+          echo "" >> .bazelrc
+          echo "build --define=lendicbuild2026=group.com.lendic.telegram" >> .bazelrc
+          echo "build --define=telegram_api_id=6" >> .bazelrc
+          echo "build --define=telegram_api_hash=eb06d4abfb49dc3eeb1aeb98ae0f581e" >> .bazelrc
 
       - name: 8. Compile Telegram via Bazel
-        env:
-          API_ID: "6"
-          API_HASH: "eb06d4abfb49dc3eeb1aeb98ae0f581e"
         run: |
           cd telegram-src
           python3 build-system/Make/Make.py \
@@ -74,13 +77,11 @@ jobs:
           echo "Упаковка скомпилированного .app в .ipa..."
           mkdir -p Payload
           
-          # Ищем собранный Telegram.app
           APP_PATH=$(find bazel-out -type d -name "Telegram.app" | head -1)
           if [ -z "$APP_PATH" ]; then
             APP_PATH=$(find . -type d -name "Telegram.app" -not -path "*/.git/*" | head -1)
           fi
           
-          # Копируем с разрешением реальных путей (-L)
           cp -RL "$APP_PATH" Payload/
           zip -qyr ../Telegram-Custom.ipa Payload
 
