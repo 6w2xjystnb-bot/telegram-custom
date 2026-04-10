@@ -7,50 +7,56 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15 # Берем ту же ОС, что и в твоем рабочем скрипте
+    runs-on: macos-15
 
     steps:
-      - name: Checkout Code
+      - name: 1. Checkout Official Telegram Code (Base)
+        run: |
+          echo "Скачиваем официальный, не сломанный код со всеми зависимостями..."
+          # Сервер качает оригинал со всеми скрытыми библиотеками
+          git clone --recursive --depth 1 https://github.com/TelegramMessenger/Telegram-iOS.git telegram-src
+
+      - name: 2. Checkout Your Custom Code
         uses: actions/checkout@v4
         with:
-          submodules: recursive
-          fetch-depth: 1
+          path: user-custom-code
 
-      - name: Setup Python
+      - name: 3. Merge Your Modifications
+        run: |
+          echo "Накладываем твои изменения из Windows поверх официального кода..."
+          # rsync аккуратно перенесет все твои измененные файлы, заменив ими оригиналы
+          rsync -av --exclude='.git' --exclude='.github' user-custom-code/ telegram-src/
+
+      - name: 4. Setup Python & Dependencies
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install Build Dependencies
+      - name: 5. Install Bazelisk & Yasm
         run: |
           brew install yasm
           brew install bazelisk
 
-      - name: Select Latest Xcode (Твой метод)
+      - name: 6. Select Latest Xcode (Твой метод)
         run: |
-          echo "=== Ищем самый свежий Xcode на сервере ==="
           XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
           echo "Используем: $XCODE"
           sudo xcode-select -s "$XCODE"
-          
-          # Узнаем точную версию, которую выбрал сервер
           REAL_VERSION=$(xcodebuild -version | grep "Xcode" | awk '{print $2}')
-          echo "Фактическая версия Xcode: $REAL_VERSION"
-          
-          # Записываем её в переменную для следующего шага
           echo "XCODE_VERSION=$REAL_VERSION" >> $GITHUB_ENV
 
-      - name: Patch Telegram Version Check
+      - name: 7. Patch Telegram Version Check
         run: |
-          echo "Обманываем Make.py: меняем требуемую версию 26.4 на ту, что мы только что нашли ($XCODE_VERSION)"
+          cd telegram-src
           find . -name "versions.json" -exec sed -i '' "s/26.4/$XCODE_VERSION/g" {} +
 
-      - name: Compile Telegram via Bazel
+      - name: 8. Compile Telegram via Bazel
         env:
           API_ID: "6"
           API_HASH: "eb06d4abfb49dc3eeb1aeb98ae0f581e"
         run: |
-          # Запускаем официальный сборщик
+          cd telegram-src
+          # Запуск официального скрипта
           python3 build-system/Make/Make.py \
             --cacheDir="$HOME/bazel-cache" \
             build \
@@ -59,21 +65,24 @@ jobs:
             --xcodeManagedCodesigning \
             --configuration=release_arm64
 
-      - name: Package to IPA
+      - name: 9. Package to IPA
         run: |
+          cd telegram-src
           echo "Упаковка скомпилированного .app в .ipa..."
           mkdir -p Payload
-          # Bazel прячет собранный .app глубоко в своих папках
+          
+          # Ищем собранный Telegram.app
           APP_PATH=$(find bazel-out -type d -name "Telegram.app" | head -1)
           if [ -z "$APP_PATH" ]; then
-            echo "Поиск по всей директории..."
             APP_PATH=$(find . -type d -name "Telegram.app" -not -path "*/.git/*" | head -1)
           fi
           
-          cp -R "$APP_PATH" Payload/
-          zip -qr Telegram-Custom.ipa Payload
+          echo "Найден файл: $APP_PATH"
+          # Используем cp -RL, чтобы скопировать реальные файлы, а не ярлыки кэша Bazel
+          cp -RL "$APP_PATH" Payload/
+          zip -qyr ../Telegram-Custom.ipa Payload
 
-      - name: Upload IPA Artifact
+      - name: 10. Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Telegram-Custom-Build
