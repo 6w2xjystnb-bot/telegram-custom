@@ -1,17 +1,19 @@
 name: Build Custom Telegram iOS 26
 
 on:
-  workflow_dispatch: # Добавляет кнопку "Run workflow" во вкладке Actions
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
 
 jobs:
   build:
-    runs-on: macos-latest # Используем сервер Apple с актуальными версиями Xcode и SDK
+    runs-on: macos-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          submodules: recursive # Критически важно: без этого не скачаются нужные библиотеки
+          submodules: recursive
           fetch-depth: 1
 
       - name: Setup Python
@@ -26,23 +28,23 @@ jobs:
 
       - name: Compile Telegram
         env:
-          # Вшитые публичные ключи, чтобы сервер Telegram пропускал авторизацию
           API_ID: "6"
           API_HASH: "eb06d4abfb49dc3eeb1aeb98ae0f581e"
         run: |
-          # Запуск официального скрипта сборки
-          python3 build-system/Make/Make --cacheDir="$HOME/bazel-cache" build --configuration release
+          # Вот оно! Make.py с правильными флагами для обхода подписи
+          python3 build-system/Make/Make.py \
+            --cacheDir="$HOME/bazel-cache" \
+            build \
+            --configurationPath=build-system/template_minimal_development_configuration.json \
+            --disableProvisioningProfiles \
+            --configuration=release_arm64
 
       - name: Package to IPA
         run: |
           echo "Упаковка скомпилированного .app в .ipa..."
           mkdir -p Payload
-          
-          # Находим скомпилированный Telegram.app и копируем его в Payload
-          # Путь может слегка отличаться в зависимости от структуры внутри build-dir
-          find build-dir -type d -name "Telegram.app" -exec cp -R {} Payload/ \;
-          
-          # Архивируем в установочный пакет
+          # Ищем собранный файл Telegram.app по всей директории
+          find . -type d -name "Telegram.app" -exec cp -R {} Payload/ \;
           zip -qr Telegram-Custom.ipa Payload
 
       - name: Upload IPA Artifact
@@ -50,4 +52,4 @@ jobs:
         with:
           name: Telegram-Custom-Build
           path: Telegram-Custom.ipa
-          retention-days: 7 # Файл будет храниться на GitHub 7 дней
+          retention-days: 7
