@@ -1,4 +1,4 @@
-name: Build Custom Telegram iOS 26
+name: Build Custom Telegram iOS
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-15 # Берем ту же ОС, что и в твоем рабочем скрипте
 
     steps:
       - name: Checkout Code
@@ -26,12 +26,31 @@ jobs:
           brew install yasm
           brew install bazelisk
 
-      - name: Compile Telegram
+      - name: Select Latest Xcode (Твой метод)
+        run: |
+          echo "=== Ищем самый свежий Xcode на сервере ==="
+          XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          echo "Используем: $XCODE"
+          sudo xcode-select -s "$XCODE"
+          
+          # Узнаем точную версию, которую выбрал сервер
+          REAL_VERSION=$(xcodebuild -version | grep "Xcode" | awk '{print $2}')
+          echo "Фактическая версия Xcode: $REAL_VERSION"
+          
+          # Записываем её в переменную для следующего шага
+          echo "XCODE_VERSION=$REAL_VERSION" >> $GITHUB_ENV
+
+      - name: Patch Telegram Version Check
+        run: |
+          echo "Обманываем Make.py: меняем требуемую версию 26.4 на ту, что мы только что нашли ($XCODE_VERSION)"
+          find . -name "versions.json" -exec sed -i '' "s/26.4/$XCODE_VERSION/g" {} +
+
+      - name: Compile Telegram via Bazel
         env:
           API_ID: "6"
           API_HASH: "eb06d4abfb49dc3eeb1aeb98ae0f581e"
         run: |
-          # Передаем скрипту все требуемые параметры, чтобы он отстал
+          # Запускаем официальный сборщик
           python3 build-system/Make/Make.py \
             --cacheDir="$HOME/bazel-cache" \
             build \
@@ -44,7 +63,14 @@ jobs:
         run: |
           echo "Упаковка скомпилированного .app в .ipa..."
           mkdir -p Payload
-          find . -type d -name "Telegram.app" -exec cp -R {} Payload/ \;
+          # Bazel прячет собранный .app глубоко в своих папках
+          APP_PATH=$(find bazel-out -type d -name "Telegram.app" | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Поиск по всей директории..."
+            APP_PATH=$(find . -type d -name "Telegram.app" -not -path "*/.git/*" | head -1)
+          fi
+          
+          cp -R "$APP_PATH" Payload/
           zip -qr Telegram-Custom.ipa Payload
 
       - name: Upload IPA Artifact
