@@ -12,8 +12,7 @@ jobs:
     steps:
       - name: 1. Checkout Official Telegram Code (Base)
         run: |
-          echo "Скачиваем официальный, не сломанный код со всеми зависимостями..."
-          # Сервер качает оригинал со всеми скрытыми библиотеками
+          echo "Скачиваем официальный код..."
           git clone --recursive --depth 1 https://github.com/TelegramMessenger/Telegram-iOS.git telegram-src
 
       - name: 2. Checkout Your Custom Code
@@ -23,21 +22,20 @@ jobs:
 
       - name: 3. Merge Your Modifications
         run: |
-          echo "Накладываем твои изменения из Windows поверх официального кода..."
-          # rsync аккуратно перенесет все твои измененные файлы, заменив ими оригиналы
+          echo "Накладываем твои изменения..."
           rsync -av --exclude='.git' --exclude='.github' user-custom-code/ telegram-src/
 
-      - name: 4. Setup Python & Dependencies
+      - name: 4. Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: 5. Install Bazelisk & Yasm
+      - name: 5. Install Dependencies
         run: |
           brew install yasm
           brew install bazelisk
 
-      - name: 6. Select Latest Xcode (Твой метод)
+      - name: 6. Select Latest Xcode
         run: |
           XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
           echo "Используем: $XCODE"
@@ -45,9 +43,15 @@ jobs:
           REAL_VERSION=$(xcodebuild -version | grep "Xcode" | awk '{print $2}')
           echo "XCODE_VERSION=$REAL_VERSION" >> $GITHUB_ENV
 
-      - name: 7. Patch Telegram Version Check
+      - name: 7. Patch Configuration
         run: |
           cd telegram-src
+          echo "Исправляем ловушки в конфигах..."
+          
+          # Заменяем тот самый плейсхолдер с пробелами на нормальную слитную строку
+          sed -i '' 's/! a random string !/lendicbuild2026/g' build-system/template_minimal_development_configuration.json
+          
+          # Подменяем версию Xcode, как мы делали раньше
           find . -name "versions.json" -exec sed -i '' "s/26.4/$XCODE_VERSION/g" {} +
 
       - name: 8. Compile Telegram via Bazel
@@ -56,7 +60,6 @@ jobs:
           API_HASH: "eb06d4abfb49dc3eeb1aeb98ae0f581e"
         run: |
           cd telegram-src
-          # Запуск официального скрипта
           python3 build-system/Make/Make.py \
             --cacheDir="$HOME/bazel-cache" \
             build \
@@ -77,12 +80,11 @@ jobs:
             APP_PATH=$(find . -type d -name "Telegram.app" -not -path "*/.git/*" | head -1)
           fi
           
-          echo "Найден файл: $APP_PATH"
-          # Используем cp -RL, чтобы скопировать реальные файлы, а не ярлыки кэша Bazel
+          # Копируем с разрешением реальных путей (-L)
           cp -RL "$APP_PATH" Payload/
           zip -qyr ../Telegram-Custom.ipa Payload
 
-      - name: 10. Upload IPA Artifact
+      - name: 10. Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: Telegram-Custom-Build
